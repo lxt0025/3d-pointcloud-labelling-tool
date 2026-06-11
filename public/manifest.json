@@ -1,0 +1,47 @@
+{
+  "name": "Point Cloud Labelling Tool",
+  "short_name": "PCLabelTool",
+  "description": "A local web application for manually labelling 3D point cloud data to create training datasets for machine learning models",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#3b82f6",
+  "orientation": "landscape-primary",
+  "categories": ["productivity", "developer", "utilities"],
+  "lang": "en",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Import Point Cloud",
+      "short_name": "Import",
+      "description": "Import a new point cloud file",
+      "url": "/?action=import",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "96x96"
+        }
+      ]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshot-wide.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide"
+    }
+  ]
+} 

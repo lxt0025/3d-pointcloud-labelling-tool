@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- Application Meta Information -->
+    <title>Point Cloud Labelling Tool</title>
+    <meta name="description" content="A local web application for manually labelling 3D point cloud data to create training datasets for machine learning models" />
+    <meta name="keywords" content="pointcloud, labelling, 3d, machine-learning, threejs, webgl" />
+    <meta name="author" content="Point Cloud Labelling Tool Team" />
+    
+    <!-- Security and Performance Headers -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self'; 
+        script-src 'self' 'unsafe-eval' 'unsafe-inline'; 
+        style-src 'self' 'unsafe-inline'; 
+        img-src 'self' data: blob:; 
+        media-src 'self' blob:; 
+        font-src 'self'; 
+        connect-src 'self' blob:; 
+        worker-src 'self' blob:; 
+        child-src 'self' blob:;
+    " />
+    
+    <!-- WebGL and 3D Rendering Support -->
+    <meta name="theme-color" content="#1a1a1a" />
+    <meta name="color-scheme" content="dark light" />
+    
+    <!-- Progressive Web App Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" href="/favicon.ico" />
+    
+    <!-- Apple Touch Icons -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    
+    <!-- Global Styles -->
+    <style>
+        /* Critical CSS for loading screen */
+        #loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            z-index: 9999;
+        }
+        
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(59, 130, 246, 0.3);
+            border-radius: 50%;
+            border-top-color: #3b82f6;
+            animation: spin 1s ease-in-out infinite;
+            margin-bottom: 20px;
+        }
+        
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+        
+        .loading-text {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        
+        .loading-subtitle {
+            font-size: 14px;
+            color: #9ca3af;
+        }
+        
+        /* Hide loading screen when app is loaded */
+        .app-loaded #loading-screen {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Point Cloud Labelling Tool</div>
+        <div class="loading-subtitle">Initializing 3D environment...</div>
+    </div>
+    
+    <!-- Main Application Root -->
+    <div id="root"></div>
+    
+    <!-- Application Entry Point -->
+    <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- Global Error Handler for External Scripts -->
+    <script>
+        // Handle uncaught errors from external scripts (like browser extensions)
+        window.addEventListener('error', function(event) {
+            // Check if the error is from an external source we don't control
+            if (event.filename && (
+                event.filename.includes('share-modal.js') ||
+                event.filename.includes('extension://') ||
+                event.filename.includes('chrome-extension://') ||
+                event.filename.includes('moz-extension://') ||
+                event.filename.includes('safari-extension://')
+            )) {
+                // Log the error but don't let it break our app
+                console.warn('External script error (ignored):', event.message, 'from:', event.filename);
+                event.preventDefault();
+                return true;
+            }
+            
+            // For our own errors, let them bubble up normally
+            return false;
+        });
+        
+        // Handle unhandled promise rejections
+        window.addEventListener('unhandledrejection', function(event) {
+            // Check if the rejection is from external scripts
+            if (event.reason && event.reason.stack && 
+                (event.reason.stack.includes('share-modal') ||
+                 event.reason.stack.includes('extension://') ||
+                 event.reason.stack.includes('chrome-extension://') ||
+                 event.reason.stack.includes('moz-extension://') ||
+                 event.reason.stack.includes('safari-extension://'))) {
+                console.warn('External script promise rejection (ignored):', event.reason);
+                event.preventDefault();
+                return true;
+            }
+            
+            return false;
+        });
+    </script>
+    
+    <!-- WebGL Feature Detection and Error Handling -->
+    <script>
+        // Check for WebGL support
+        function checkWebGLSupport() {
+            try {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+                if (!gl) {
+                    throw new Error('WebGL not supported');
+                }
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+        
+        // Show error message if WebGL is not supported
+        if (!checkWebGLSupport()) {
+            document.getElementById('loading-screen').innerHTML = `
+                <div style="text-align: center; max-width: 500px; padding: 20px;">
+                    <h2 style="color: #ef4444; margin-bottom: 16px;">WebGL Not Supported</h2>
+                    <p style="color: #9ca3af; line-height: 1.6; margin-bottom: 20px;">
+                        Your browser doesn't support WebGL, which is required for 3D point cloud visualization.
+                    </p>
+                    <p style="color: #9ca3af; line-height: 1.6;">
+                        Please try using a modern browser like Chrome, Firefox, or Safari.
+                    </p>
+                </div>
+            `;
+        }
+        
+        // Remove loading screen when app is ready
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                document.body.classList.add('app-loaded');
+            }, 1000);
+        });
+    </script>
+</body>
+</html> 
