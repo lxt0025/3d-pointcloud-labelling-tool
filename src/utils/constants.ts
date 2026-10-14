@@ -138,8 +138,8 @@ export const PERFORMANCE = {
  */
 export const RENDERING_LIMITS = {
   maxPointSize: 50,
-  minPointSize: 0.1,
-  defaultPointSize: 2.0,
+  minPointSize: 0.001,
+  defaultPointSize: 0.001,
   maxLODLevels: 5,
   maxSelectionPoints: 1000000, // 1M points per selection
   maxConcurrentSelections: 100,
@@ -253,7 +253,7 @@ export const POINT_CLOUD_COLORS = {
  * Default Brush Tool Configuration
  */
 export const DEFAULT_BRUSH_CONFIG: BrushToolConfig = {
-  radius: 5.0,
+  radius: 0.005,
   shape: 'sphere',
   useFalloff: true,
   falloffType: 'smooth',
@@ -292,7 +292,7 @@ export const DEFAULT_POLYGON_CONFIG: PolygonSelectConfig = {
  * Default Rendering Settings
  */
 export const DEFAULT_RENDERING_SETTINGS: RenderingSettings = {
-  pointSize: 2.0,
+  pointSize: 0.001,
   sizeAttenuation: true,
   maxPointsToRender: 10000000,
   levelOfDetail: {
@@ -620,4 +620,4 @@ export const VALIDATION_RULES = {
     min: 1,
     max: 2147483648, // 2GB
   },
-} as const 
+} as const

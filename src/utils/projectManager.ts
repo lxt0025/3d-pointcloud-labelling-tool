@@ -125,14 +125,14 @@ class ProjectManager extends EventTarget {
       selections: [],
       settings: {
         renderingSettings: {
-          pointSize: 0.05,
+          pointSize: 0.001,
           colorMode: 'rgb',
           backgroundColor: '#1a1a1a',
         },
         labelingSettings: {
           autoSave: true,
           showStatistics: true,
-          defaultBrushSize: 1.0,
+          defaultBrushSize: 0.005,
         },
       },
     }
@@ -157,6 +157,10 @@ class ProjectManager extends EventTarget {
     if (!projectToSave) {
       throw new Error('No project to save')
     }
+
+    // Labels are edited through labelManager, so copy its current state into
+    // the project before persisting it to IndexedDB.
+    projectToSave.labels = labelManager.getAllLabels()
 
     // Update metadata
     projectToSave.metadata.updatedAt = new Date().toISOString()
@@ -444,7 +448,11 @@ class ProjectManager extends EventTarget {
       throw new Error('No enhanced project to save')
     }
 
+    // The active UI uses EnhancedProject. Keep its project-level labels in
+    // sync with labelManager before every manual or file-triggered save.
+    projectToSave.labels = labelManager.getAllLabels()
     projectToSave.metadata.updatedAt = new Date().toISOString()
+    projectToSave.metadata.statistics.totalLabels = projectToSave.labels.length
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([PROJECT_STORE_NAME], 'readwrite')
@@ -963,4 +971,4 @@ export const projectManager = new ProjectManager()
 // initialise on module load
 projectManager.initialise().catch(console.error)
 
-export default projectManager 
+export default projectManager

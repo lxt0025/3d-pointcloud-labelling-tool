@@ -123,7 +123,7 @@ export class SelectionManager {
       selectionMode: 'accumulate', // Default to accumulate mode
       toolConfigs: {
         brush: {
-          radius: 0.5,
+          radius: 0.005,
           shape: 'sphere',
           useFalloff: false,
           mode: 'add',
@@ -317,6 +317,63 @@ export class SelectionManager {
     })
 
     this.clearCurrentSelection()
+    return true
+  }
+
+  /**
+   * Assign every currently unlabeled point to the active label.
+   * Existing point assignments are preserved.
+   */
+  assignAllUnlabeledToActiveLabel(): boolean {
+    if (!this.currentPointCloud || !this.state.activeLabel) {
+      return false
+    }
+
+    const labelId = this.state.activeLabel.id
+    const label = labelManager.getLabel(labelId)
+    if (!label) {
+      return false
+    }
+
+    const totalPoints = Math.floor(this.currentPointCloud.positions.length / 3)
+    const pointIndices: number[] = []
+
+    for (let pointIndex = 0; pointIndex < totalPoints; pointIndex++) {
+      if (!this.assignedPoints.has(pointIndex)) {
+        pointIndices.push(pointIndex)
+      }
+    }
+
+    if (pointIndices.length === 0) {
+      return false
+    }
+
+    pointIndices.forEach(pointIndex => {
+      this.assignedPoints.set(pointIndex, labelId)
+    })
+
+    labelManager.updateLabelPointCount(labelId, label.pointCount + pointIndices.length)
+
+    const typedPointIndices = new Uint32Array(pointIndices)
+    const selection: Selection = {
+      id: this.generateSelectionId(),
+      labelId,
+      pointIndices: typedPointIndices,
+      toolUsed: this.state.activeTool,
+      createdAt: new Date(),
+      metadata: {
+        toolParameters: { operation: 'fill-unlabeled' },
+      },
+    }
+
+    this.selections.set(selection.id, selection)
+    this.addToHistory('assign', selection, typedPointIndices, labelId)
+
+    // Clear any transient selection before notifying UI listeners.
+    this.clearCurrentSelection()
+    this.emitter.emit('selection:created', selection)
+    this.emitter.emit('points:assigned', { labelId, pointIndices })
+
     return true
   }
 
@@ -1255,4 +1312,4 @@ export function getToolIcon(tool: SelectionTool): string {
     polygon: 'P',
   }
   return icons[tool] || '?'
-} 
+}

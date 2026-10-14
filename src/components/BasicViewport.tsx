@@ -27,7 +27,7 @@ interface BasicViewportProps {
 
 export const BasicViewport: React.FC<BasicViewportProps> = ({
   pointCloud,
-  pointSize = 0.05,
+  pointSize = 0.001,
   className = '',
 }) => {
   const mountRef = useRef<HTMLDivElement>(null)
@@ -251,22 +251,40 @@ export const BasicViewport: React.FC<BasicViewportProps> = ({
     const raycaster = raycasterRef.current
     const mouseVector = new THREE.Vector2(mouse.x, mouse.y)
     raycaster.setFromCamera(mouseVector, cameraRef.current)
-    raycaster.params.Points.threshold = 0.1
+
+    // Keep point picking in the same scale as the visible points and brush.
+    // A fixed 0.1 threshold is far too large for millimetre-scale point clouds.
+    const selectionState = selectionManager.getState()
+    const pickRadius = selectionState.activeTool === 'brush'
+      ? selectionState.toolConfigs.brush.radius
+      : pointSize
+    raycaster.params.Points.threshold = Math.max(pointSize, pickRadius)
 
     const intersects = raycaster.intersectObject(pointsRef.current)
     if (intersects.length > 0) {
       const intersection = intersects[0]
       if (intersection && intersection.index !== undefined && intersection.point) {
+        // THREE.Points returns the closest position on the ray, which can be
+        // offset from the actual point by the picking threshold. Use the exact
+        // hit point as the brush centre so small brushes always include it.
+        const position = pointsRef.current.geometry.getAttribute('position')
+        const exactPoint = new THREE.Vector3(
+          position.getX(intersection.index),
+          position.getY(intersection.index),
+          position.getZ(intersection.index),
+        )
+        pointsRef.current.localToWorld(exactPoint)
+
         return {
           pointIndex: intersection.index,
-          point: intersection.point,
+          point: exactPoint,
           distance: intersection.distance,
           object: pointsRef.current,
         }
       }
     }
     return null
-  }, [pointCloud])
+  }, [pointCloud, pointSize])
 
   // Raycast cube handles
   type CubeHandleHit = { handleName: string; point: THREE.Vector3 }
@@ -462,8 +480,10 @@ export const BasicViewport: React.FC<BasicViewportProps> = ({
 
           if (intersection && intersection.point) {
             const brushCenter = intersection.point
-            const radiusPoint = brushCenter.clone()
-            radiusPoint.x += brushRadius
+            const cameraRight = new THREE.Vector3()
+              .setFromMatrixColumn(cameraRef.current.matrixWorld, 0)
+              .normalize()
+            const radiusPoint = brushCenter.clone().addScaledVector(cameraRight, brushRadius)
 
             const centerScreen = new THREE.Vector3()
             const radiusScreen = new THREE.Vector3()
@@ -496,7 +516,7 @@ export const BasicViewport: React.FC<BasicViewportProps> = ({
       setCursorIndicator({
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
-        size: Math.max(10, Math.min(200, size)), // Clamp between 10-200px
+        size: Math.max(2, Math.min(200, size)), // Keep tiny brushes accurate but visible
         visible: !!pointCloud,
         tool: state.activeTool,
       })
@@ -843,4 +863,4 @@ export const BasicViewport: React.FC<BasicViewportProps> = ({
   )
 }
 
-export default BasicViewport 
+export default BasicViewport

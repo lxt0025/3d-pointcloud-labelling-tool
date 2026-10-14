@@ -165,15 +165,15 @@ export const ToolPanel: React.FC<ToolPanelProps> = ({
           <div className="tool-panel__brush-radius-control">
             <input
               type="range"
-              min="0.1"
-              max="5.0"
-              step="0.1"
+              min="0.001"
+              max="0.05"
+              step="0.001"
               value={selectionState.toolConfigs.brush.radius}
               onChange={(e) => handleBrushConfigUpdate({ radius: parseFloat(e.target.value) })}
               className="tool-panel__brush-radius-slider"
             />
             <span className="tool-panel__brush-radius-value">
-              {selectionState.toolConfigs.brush.radius.toFixed(1)}
+              {selectionState.toolConfigs.brush.radius.toFixed(3)}
             </span>
           </div>
         </div>
@@ -345,4 +345,4 @@ const PolygonSelectConfigPanel: React.FC<PolygonSelectConfigPanelProps> = ({ con
   )
 }
 
-export default ToolPanel 
+export default ToolPanel

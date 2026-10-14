@@ -48,7 +48,7 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ currentProject }) => {
   // Application state
   const [currentPointCloud, setCurrentPointCloud] = useState<PointCloudData | null>(null)
-  const [pointSize, setPointSize] = useState(0.05)
+  const [pointSize, setPointSize] = useState(0.001)
   
   // Label management state
   const [labels, setLabels] = useState<Label[]>([])
@@ -69,6 +69,10 @@ const Layout: React.FC<LayoutProps> = ({ currentProject }) => {
 
   const handleLabelsChange = useCallback((updatedLabels: Label[]) => {
     setLabels(updatedLabels)
+  }, [])
+
+  const handleFillUnlabeled = useCallback(() => {
+    return selectionManager.assignAllUnlabeledToActiveLabel()
   }, [])
 
   const handleDatasetAdded = useCallback((_file: ProjectFile) => {
@@ -217,6 +221,13 @@ const Layout: React.FC<LayoutProps> = ({ currentProject }) => {
   }, [currentPointCloud, labels])
 
   const labeledPoints = labels.reduce((sum, l) => sum + l.pointCount, 0)
+  const totalPointCount = currentPointCloud
+    ? Math.floor(currentPointCloud.positions.length / 3)
+    : 0
+  const unlabeledPointCount = Math.max(
+    0,
+    totalPointCount - selectionManager.getStatistics().totalAssignedPoints,
+  )
   const progressPct = currentPointCloud
     ? Math.round(labeledPoints / currentPointCloud.metadata.pointCount * 100) || 0
     : 0
@@ -257,21 +268,21 @@ const Layout: React.FC<LayoutProps> = ({ currentProject }) => {
           <div className="sidebar-section">
             <div className="sidebar-section__label">
               Point Size
-              <span className="sidebar-section__badge">{pointSize.toFixed(2)}</span>
+              <span className="sidebar-section__badge">{pointSize.toFixed(4)}</span>
             </div>
             <div className="sidebar-section__body">
               <input
                 type="range"
-                min="0.01"
+                min="0.001"
                 max="0.5"
-                step="0.01"
+                step="0.001"
                 value={pointSize}
                 onChange={(e) => setPointSize(parseFloat(e.target.value))}
                 className="range-slider"
                 disabled={!currentPointCloud}
               />
               <div className="preset-row">
-                {([['XS', 0.01], ['S', 0.05], ['M', 0.1], ['L', 0.2]] as [string, number][]).map(([label, val]) => (
+                {([['XS', 0.001], ['S', 0.002], ['M', 0.005], ['L', 0.01]] as [string, number][]).map(([label, val]) => (
                   <button
                     key={label}
                     className={`preset-btn${pointSize === val ? ' preset-btn--active' : ''}`}
@@ -366,6 +377,8 @@ const Layout: React.FC<LayoutProps> = ({ currentProject }) => {
               activeLabel={activeLabel}
               onLabelSelect={handleLabelSelect}
               onLabelsChange={handleLabelsChange}
+              unlabeledPointCount={unlabeledPointCount}
+              onFillUnlabeled={handleFillUnlabeled}
             />
           </div>
 

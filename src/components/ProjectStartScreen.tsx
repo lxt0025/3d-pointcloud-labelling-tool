@@ -104,14 +104,14 @@ export const ProjectStartScreen: React.FC<ProjectStartScreenProps> = ({
         selections: {},
         settings: {
           renderingSettings: {
-            pointSize: 0.05,
+            pointSize: 0.001,
             colorMode: 'rgb',
             backgroundColor: '#1a1a1a',
           },
           labelingSettings: {
             autoSave: true,
             showStatistics: true,
-            defaultBrushSize: 1.0,
+            defaultBrushSize: 0.005,
           },
         },
       }
@@ -398,4 +398,4 @@ export const ProjectStartScreen: React.FC<ProjectStartScreenProps> = ({
   )
 }
 
-export default ProjectStartScreen 
+export default ProjectStartScreen

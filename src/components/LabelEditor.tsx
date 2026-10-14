@@ -16,6 +16,10 @@ export interface LabelEditorProps {
   onLabelSelect?: (label: Label | null) => void
   /** Callback when labels change */
   onLabelsChange?: (labels: Label[]) => void
+  /** Number of points that do not currently have a label */
+  unlabeledPointCount?: number
+  /** Assign all unlabeled points to the active label */
+  onFillUnlabeled?: () => boolean
   /** CSS class name */
   className?: string
 }
@@ -31,6 +35,8 @@ export const LabelEditor: React.FC<LabelEditorProps> = ({
   activeLabel,
   onLabelSelect,
   onLabelsChange,
+  unlabeledPointCount = 0,
+  onFillUnlabeled,
   className = '',
 }) => {
   // State
@@ -143,6 +149,24 @@ export const LabelEditor: React.FC<LabelEditorProps> = ({
     labelManager.toggleLabelVisibility(labelId)
   }, [])
 
+  const handleFillUnlabeled = useCallback(() => {
+    if (!activeLabel || unlabeledPointCount === 0 || !onFillUnlabeled) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Assign ${unlabeledPointCount.toLocaleString()} currently unlabeled points to "${activeLabel.name}"?\n\nExisting labelled points will be preserved.`,
+    )
+    if (!confirmed) {
+      return
+    }
+
+    setError(null)
+    if (!onFillUnlabeled()) {
+      setError('Unable to fill unlabeled points')
+    }
+  }, [activeLabel, unlabeledPointCount, onFillUnlabeled])
+
   // Start editing label
   const startEditing = useCallback((label: Label) => {
     setEditingLabel({
@@ -214,6 +238,29 @@ export const LabelEditor: React.FC<LabelEditorProps> = ({
           <span className="label-editor__stat-value">{stats.visibleLabels}</span>
           <span className="label-editor__stat-label">Visible</span>
         </div>
+      </div>
+
+      <div className="label-editor__fill-unlabeled">
+        <button
+          type="button"
+          className="label-editor__fill-button"
+          onClick={handleFillUnlabeled}
+          disabled={!activeLabel || unlabeledPointCount === 0 || !onFillUnlabeled}
+          title={
+            !activeLabel
+              ? 'Select an active label first'
+              : unlabeledPointCount === 0
+                ? 'All points are already labelled'
+                : `Assign ${unlabeledPointCount.toLocaleString()} unlabeled points to ${activeLabel.name}`
+          }
+        >
+          Fill Unlabeled
+        </button>
+        <span className="label-editor__fill-description">
+          {activeLabel
+            ? `${unlabeledPointCount.toLocaleString()} unlabeled → ${activeLabel.name}`
+            : 'Select a label to fill the remaining points'}
+        </span>
       </div>
 
       {/* Labels list */}
@@ -430,4 +477,4 @@ const LabelEditModal: React.FC<LabelEditModalProps> = ({ label, onSave, onCancel
   )
 }
 
-export default LabelEditor 
+export default LabelEditor
