@@ -302,26 +302,36 @@ export class LabelManager {
           continue
         }
 
-        const createOptions: {
-          color?: string
-          description?: string
-          parentId?: string
-        } = {}
-        
-        if (labelData.color) createOptions.color = labelData.color
-        if (labelData.description) createOptions.description = labelData.description
-        if (labelData.parentId) createOptions.parentId = labelData.parentId
-        
-        const label = this.createLabel(labelData.name, createOptions)
-
-        if (label) {
-          importedLabels.push(label)
+        const id = labelData.id || this.generateLabelId()
+        const metadata: Record<string, unknown> = labelData.metadata
+          ? { ...labelData.metadata }
+          : { isBuiltIn: false }
+        const lastModified = metadata.lastModified
+        if (lastModified) {
+          metadata.lastModified = new Date(lastModified as string | number | Date)
         }
+
+        const label: Label = {
+          id,
+          name: labelData.name.trim(),
+          color: labelData.color || this.getNextAvailableColor(),
+          pointCount: Math.max(0, labelData.pointCount || 0),
+          visible: labelData.visible ?? true,
+          createdAt: labelData.createdAt ? new Date(labelData.createdAt) : new Date(),
+          metadata,
+          ...(labelData.description && { description: labelData.description }),
+          ...(labelData.parentId && { parentId: labelData.parentId }),
+        }
+
+        this.labels.set(id, label)
+        importedLabels.push(label)
+        this.emitter.emit('label:created', label)
       } catch (error) {
         console.warn(`Failed to import label "${labelData.name}":`, error)
       }
     }
 
+    this.saveToStorage()
     this.emitter.emit('labels:imported', importedLabels)
     return importedLabels
   }
@@ -510,4 +520,4 @@ export function createDefaultLabels(): Label[] {
 export function resetToDefaultLabels(): Label[] {
   labelManager.clearAllLabels()
   return createDefaultLabels()
-} 
+}

@@ -22,6 +22,7 @@ import type {
   ExportFormat,
   ExportOptions,
   ImportResult,
+  Selection,
 } from '../types/index'
 import { labelManager } from './labelManager'
 
@@ -210,11 +211,9 @@ class ProjectManager extends EventTarget {
         this.currentProject = project
         this.isDirty = false
         
-        // Restore labels to label manager
-        labelManager.clearAllLabels()
-        if (project.labels.length > 0) {
-          labelManager.importLabels(project.labels)
-        }
+        // Restore labels with their original IDs so saved point assignments
+        // continue to reference the correct labels.
+        labelManager.importLabels(project.labels, { replaceExisting: true })
 
         this.dispatchEvent(new CustomEvent('project:loaded', { detail: project }))
         resolve(project)
@@ -346,6 +345,62 @@ class ProjectManager extends EventTarget {
     }
 
     this.dispatchEvent(new CustomEvent('project:exported', { detail: { format, data } }))
+    return blob
+  }
+
+  /**
+   * Export one dataset from the active enhanced project for semantic segmentation.
+   * Coordinates and RGB come from the original point cloud; annotations are
+   * written to a separate integer `label` field for every point.
+   */
+  async exportEnhancedDataset(
+    project: EnhancedProject,
+    fileId: string,
+    format: 'ply' | 'csv',
+    options: ExportOptions = {},
+  ): Promise<Blob> {
+    const file = project.files.find(projectFile => projectFile.id === fileId)
+    if (!file?.data) {
+      throw new Error('No active point cloud data to export')
+    }
+
+    const labelValues = this.createLabelValueMap(project.labels)
+    const pointLabels = this.createPointLabelArray(
+      file.data.positions.length / 3,
+      project.selections[fileId] || [],
+      labelValues,
+    )
+    const baseName = file.name.replace(/\.[^.]+$/, '') || 'pointcloud'
+
+    let data: string
+    let mimeType: string
+    let fileName: string
+
+    if (format === 'ply') {
+      data = this.exportEnhancedToPLY(file.data, project.labels, labelValues, pointLabels)
+      mimeType = 'application/octet-stream'
+      fileName = `${baseName}_labeled.ply`
+    } else {
+      data = this.exportEnhancedToCSV(file.data, project.labels, labelValues, pointLabels)
+      mimeType = 'text/csv;charset=utf-8'
+      fileName = `${baseName}_labeled.csv`
+    }
+
+    const blob = new Blob([data], { type: mimeType })
+    if (options.download !== false) {
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    }
+
+    this.dispatchEvent(new CustomEvent('project:exported', {
+      detail: { format, data, fileId },
+    }))
     return blob
   }
 
@@ -503,11 +558,9 @@ class ProjectManager extends EventTarget {
         this.currentEnhancedProject = project
         this.isDirty = false
         
-        // Restore labels to label manager
-        labelManager.clearAllLabels()
-        if (project.labels.length > 0) {
-          labelManager.importLabels(project.labels)
-        }
+        // Restore labels with their original IDs so saved point assignments
+        // continue to reference the correct labels.
+        labelManager.importLabels(project.labels, { replaceExisting: true })
 
         this.dispatchEvent(new CustomEvent('project:loaded', { detail: project }))
         resolve(project)
@@ -795,6 +848,163 @@ class ProjectManager extends EventTarget {
     }
 
     return lines.join('\n')
+  }
+
+  /** Build stable semantic class values, with the medical binary labels fixed. */
+  private createLabelValueMap(labels: Label[]): Map<string, number> {
+    const values = new Map<string, number>()
+    const healthy = labels.find(label => label.name.trim().toLowerCase() === 'healthy')
+    const lesion = labels.find(label => label.name.trim().toLowerCase() === 'lesion')
+
+    if (healthy) values.set(healthy.id, 0)
+    if (lesion) values.set(lesion.id, 1)
+
+    let nextValue = healthy || lesion ? 2 : 0
+    for (const label of labels) {
+      if (!values.has(label.id)) {
+        values.set(label.id, nextValue++)
+      }
+    }
+
+    return values
+  }
+
+  /** Convert saved selection groups into one semantic label value per point. */
+  private createPointLabelArray(
+    pointCount: number,
+    selections: Selection[],
+    labelValues: ReadonlyMap<string, number>,
+  ): Int32Array {
+    const pointLabels = new Int32Array(pointCount)
+    pointLabels.fill(-1)
+
+    for (const selection of selections) {
+      const labelValue = labelValues.get(selection.labelId)
+      if (labelValue === undefined) continue
+
+      for (const pointIndex of Array.from(selection.pointIndices as ArrayLike<number>)) {
+        if (Number.isInteger(pointIndex) && pointIndex >= 0 && pointIndex < pointCount) {
+          pointLabels[pointIndex] = labelValue
+        }
+      }
+    }
+
+    return pointLabels
+  }
+
+  private exportEnhancedToCSV(
+    pointCloud: PointCloudData,
+    labels: Label[],
+    labelValues: ReadonlyMap<string, number>,
+    pointLabels: Int32Array,
+  ): string {
+    const labelsByValue = new Map<number, Label>()
+    for (const label of labels) {
+      const value = labelValues.get(label.id)
+      if (value !== undefined) labelsByValue.set(value, label)
+    }
+
+    const hasColors = !!pointCloud.colors
+    const headers = ['x', 'y', 'z']
+    if (hasColors) headers.push('r', 'g', 'b')
+    headers.push('label', 'label_name', 'label_id')
+
+    const lines = [headers.join(',')]
+    const pointCount = Math.floor(pointCloud.positions.length / 3)
+
+    for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
+      const offset = pointIndex * 3
+      const row = [
+        String(pointCloud.positions[offset] ?? 0),
+        String(pointCloud.positions[offset + 1] ?? 0),
+        String(pointCloud.positions[offset + 2] ?? 0),
+      ]
+
+      if (hasColors && pointCloud.colors) {
+        row.push(
+          String(this.toColorByte(pointCloud.colors[offset] ?? 0)),
+          String(this.toColorByte(pointCloud.colors[offset + 1] ?? 0)),
+          String(this.toColorByte(pointCloud.colors[offset + 2] ?? 0)),
+        )
+      }
+
+      const labelValue = pointLabels[pointIndex] ?? -1
+      const label = labelsByValue.get(labelValue)
+      row.push(
+        String(labelValue),
+        this.escapeCSV(label?.name || 'unlabeled'),
+        this.escapeCSV(label?.id || ''),
+      )
+      lines.push(row.join(','))
+    }
+
+    return lines.join('\n')
+  }
+
+  private exportEnhancedToPLY(
+    pointCloud: PointCloudData,
+    labels: Label[],
+    labelValues: ReadonlyMap<string, number>,
+    pointLabels: Int32Array,
+  ): string {
+    const pointCount = Math.floor(pointCloud.positions.length / 3)
+    const hasColors = !!pointCloud.colors
+    const header = [
+      'ply',
+      'format ascii 1.0',
+      'comment generated_by 3d-pointcloud-labelling-tool',
+      'comment label_map -1 unlabeled',
+      ...labels.flatMap(label => {
+        const value = labelValues.get(label.id)
+        if (value === undefined) return []
+        const safeName = label.name.replace(/[\r\n]+/g, ' ').trim()
+        const safeId = label.id.replace(/[\r\n]+/g, ' ').trim()
+        return [`comment label_map ${value} ${safeName} label_id=${safeId}`]
+      }),
+      `element vertex ${pointCount}`,
+      'property float x',
+      'property float y',
+      'property float z',
+      ...(hasColors ? [
+        'property uchar red',
+        'property uchar green',
+        'property uchar blue',
+      ] : []),
+      'property int label',
+      'end_header',
+    ]
+
+    const lines = [header.join('\n')]
+    for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
+      const offset = pointIndex * 3
+      const values: Array<string | number> = [
+        pointCloud.positions[offset] ?? 0,
+        pointCloud.positions[offset + 1] ?? 0,
+        pointCloud.positions[offset + 2] ?? 0,
+      ]
+
+      if (hasColors && pointCloud.colors) {
+        values.push(
+          this.toColorByte(pointCloud.colors[offset] ?? 0),
+          this.toColorByte(pointCloud.colors[offset + 1] ?? 0),
+          this.toColorByte(pointCloud.colors[offset + 2] ?? 0),
+        )
+      }
+
+      values.push(pointLabels[pointIndex] ?? -1)
+      lines.push(values.join(' '))
+    }
+
+    return `${lines.join('\n')}\n`
+  }
+
+  private toColorByte(value: number): number {
+    return Math.round(Math.min(1, Math.max(0, value)) * 255)
+  }
+
+  private escapeCSV(value: string): string {
+    if (!/[",\r\n]/.test(value)) return value
+    return `"${value.replace(/"/g, '""')}"`
   }
 
   /**

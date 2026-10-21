@@ -16,6 +16,8 @@ import type {
 } from '../types/index'
 import { projectManager } from '../utils/projectManager'
 import { processFile, validateFile } from '../utils/fileProcessing'
+import { selectionManager } from '../utils/selectionManager'
+import { labelManager } from '../utils/labelManager'
 
 export interface ProjectPanelProps {
   /** Current enhanced project */
@@ -25,7 +27,7 @@ export interface ProjectPanelProps {
   /** Callback when a dataset is added to the project */
   onDatasetAdded?: (file: ProjectFile) => void
   /** Callback when point cloud changes due to file switching */
-  onPointCloudChange?: (pointCloud: PointCloudData | null) => void
+  onPointCloudChange?: (pointCloud: PointCloudData | null, fileId: string | null) => void
   /** CSS class name */
   className?: string
 }
@@ -39,17 +41,20 @@ interface ProjectState {
 
 export const ProjectPanel: React.FC<ProjectPanelProps> = ({
   currentProject,
-  pointCloud,
   onDatasetAdded,
   onPointCloudChange,
   className = '',
 }) => {
+  const initialFileIndex = currentProject.activeFileIndex >= 0
+    ? currentProject.activeFileIndex
+    : (currentProject.files.length > 0 ? 0 : -1)
+
   // State
   const [state, setState] = useState<ProjectState>({
     isLoading: false,
     error: null,
     isDirty: false,
-    activeFileId: currentProject.files.length > 0 ? currentProject.files[0]?.id || null : null,
+    activeFileId: initialFileIndex >= 0 ? currentProject.files[initialFileIndex]?.id || null : null,
   })
 
   const [isCollapsed, setIsCollapsed] = useState(() => {
@@ -73,23 +78,43 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
     setIsCollapsed((prev: boolean) => !prev)
   }, [])
 
-  // Update isDirty when point cloud changes
+  // Label and point-assignment changes make the project eligible for manual save.
   useEffect(() => {
-    if (pointCloud !== undefined) {
-      setState(prev => ({ ...prev, isDirty: projectManager.isDirtyProject() }))
+    const markDirty = () => {
+      setState(prev => ({ ...prev, isDirty: true }))
     }
-  }, [pointCloud])
+
+    labelManager.on('label:created', markDirty)
+    labelManager.on('label:updated', markDirty)
+    labelManager.on('label:deleted', markDirty)
+    labelManager.on('labels:cleared', markDirty)
+
+    return () => {
+      labelManager.off('label:created', markDirty)
+      labelManager.off('label:updated', markDirty)
+      labelManager.off('label:deleted', markDirty)
+      labelManager.off('labels:cleared', markDirty)
+    }
+  }, [])
 
   // Handle file selection
   const handleFileSelect = useCallback((fileId: string) => {
-    setState(prev => ({ ...prev, activeFileId: fileId }))
+    if (fileId === state.activeFileId) return
+
+    if (state.activeFileId) {
+      currentProject.selections[state.activeFileId] = selectionManager.getSelectionsSnapshot()
+    }
+
+    const fileIndex = currentProject.files.findIndex(file => file.id === fileId)
+    currentProject.activeFileIndex = fileIndex
+    setState(prev => ({ ...prev, activeFileId: fileId, isDirty: true }))
     
     // Find the file and load its point cloud data
-    const file = currentProject.files.find(f => f.id === fileId)
+    const file = currentProject.files[fileIndex]
     if (file?.data) {
-      onPointCloudChange?.(file.data)
+      onPointCloudChange?.(file.data, file.id)
     }
-  }, [currentProject.files, onPointCloudChange])
+  }, [currentProject, onPointCloudChange, state.activeFileId])
 
   // Handle dataset file upload
   const handleDatasetUpload = useCallback(async (files: File[]) => {
@@ -127,6 +152,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
 
         // Add file to enhanced project
         currentProject.files.push(projectFile)
+        currentProject.selections[fileId] = []
         
         // Update project metadata
         currentProject.metadata.updatedAt = new Date().toISOString()
@@ -134,7 +160,8 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
         // Set as active file if it's the first one
         if (currentProject.files.length === 1) {
           setState(prev => ({ ...prev, activeFileId: fileId }))
-          onPointCloudChange?.(pointCloudData)
+          currentProject.activeFileIndex = 0
+          onPointCloudChange?.(pointCloudData, fileId)
         }
 
         // Clean up progress tracking
@@ -174,6 +201,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
       const fileIndex = currentProject.files.findIndex(f => f.id === fileId)
       if (fileIndex >= 0) {
         currentProject.files.splice(fileIndex, 1)
+        delete currentProject.selections[fileId]
         currentProject.metadata.updatedAt = new Date().toISOString()
 
         // Update active file if needed
@@ -183,9 +211,11 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
           
           if (newActiveFileId) {
             const newActiveFile = currentProject.files.find(f => f.id === newActiveFileId)
-            onPointCloudChange?.(newActiveFile?.data || null)
+            currentProject.activeFileIndex = currentProject.files.findIndex(f => f.id === newActiveFileId)
+            onPointCloudChange?.(newActiveFile?.data || null, newActiveFileId)
           } else {
-            onPointCloudChange?.(null)
+            currentProject.activeFileIndex = -1
+            onPointCloudChange?.(null, null)
           }
         }
 
@@ -207,6 +237,14 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
   const handleSaveProject = useCallback(async () => {
     try {
       setState(prev => ({ ...prev, isLoading: true, error: null }))
+
+      if (state.activeFileId) {
+        currentProject.selections[state.activeFileId] = selectionManager.getSelectionsSnapshot()
+        currentProject.activeFileIndex = currentProject.files.findIndex(
+          file => file.id === state.activeFileId,
+        )
+      }
+
       await projectManager.saveEnhancedProject(currentProject)
       setState(prev => ({ ...prev, isDirty: false, isLoading: false }))
     } catch (error) {
@@ -216,13 +254,27 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
         isLoading: false,
       }))
     }
-  }, [currentProject])
+  }, [currentProject, state.activeFileId])
 
   // Export project
   const handleExportProject = useCallback(async (format: ExportFormat, options: ExportOptions = {}) => {
     try {
       setState(prev => ({ ...prev, isLoading: true, error: null }))
-      await projectManager.exportProject(format, { ...options, download: true })
+
+      if (!state.activeFileId || (format !== 'ply' && format !== 'csv')) {
+        throw new Error('Choose an active dataset and export it as PLY or CSV')
+      }
+
+      // Export the latest in-memory annotations, including changes made since
+      // the last manual save.
+      currentProject.labels = labelManager.getAllLabels()
+      currentProject.selections[state.activeFileId] = selectionManager.getSelectionsSnapshot()
+      await projectManager.exportEnhancedDataset(
+        currentProject,
+        state.activeFileId,
+        format,
+        { ...options, download: true },
+      )
       setState(prev => ({ ...prev, isLoading: false }))
       setShowExportModal(false)
     } catch (error) {
@@ -232,7 +284,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
         isLoading: false,
       }))
     }
-  }, [])
+  }, [currentProject, state.activeFileId])
 
   // Handle file drop for dataset upload
   const handleFileDrop = useCallback((e: React.DragEvent) => {
@@ -329,14 +381,14 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
               <button
                 className="project-panel__button primary"
                 onClick={handleSaveProject}
-                disabled={state.isLoading || !state.isDirty}
+                disabled={state.isLoading}
               >
                 Save
               </button>
               <button
                 className="project-panel__button secondary"
                 onClick={() => setShowExportModal(true)}
-                disabled={state.isLoading}
+                disabled={state.isLoading || !state.activeFileId}
               >
                 Export
               </button>
@@ -513,7 +565,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
         <div className="modal-overlay" onClick={() => setShowExportModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Export Project</h3>
+              <h3>Export Active Dataset</h3>
               <button 
                 className="modal-close"
                 onClick={() => setShowExportModal(false)}
@@ -525,34 +577,25 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
               <div className="export-options">
                 <div className="export-format">
                   <h4>Choose Export Format:</h4>
+                  <p>
+                    Original XYZ/RGB values are preserved. Semantic labels are
+                    exported separately as integers: healthy = 0, lesion = 1,
+                    unlabeled = -1.
+                  </p>
                   <div className="format-grid">
                     <button
                       className="format-option"
-                      onClick={() => handleExportProject('json')}
+                      onClick={() => handleExportProject('ply')}
                     >
-                      <span className="format-name">JSON Project</span>
-                      <span className="format-desc">Complete project with all datasets</span>
+                      <span className="format-name">PLY Dataset</span>
+                      <span className="format-desc">XYZ, original RGB, and integer label</span>
                     </button>
                     <button
                       className="format-option"
                       onClick={() => handleExportProject('csv')}
                     >
-                      <span className="format-name">CSV Data</span>
-                      <span className="format-desc">Point clouds with labels</span>
-                    </button>
-                    <button
-                      className="format-option"
-                      onClick={() => handleExportProject('ply')}
-                    >
-                      <span className="format-name">PLY Files</span>
-                      <span className="format-desc">3D point cloud format</span>
-                    </button>
-                    <button
-                      className="format-option"
-                      onClick={() => handleExportProject('annotations')}
-                    >
-                      <span className="format-name">Annotations Only</span>
-                      <span className="format-desc">Labels and metadata</span>
+                      <span className="format-name">CSV Dataset</span>
+                      <span className="format-desc">Readable per-point data for verification</span>
                     </button>
                   </div>
                 </div>
@@ -573,4 +616,4 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
   )
 }
 
-export default ProjectPanel 
+export default ProjectPanel

@@ -425,6 +425,76 @@ export class SelectionManager {
   }
 
   /**
+   * Create a canonical snapshot of the saved point assignments.
+   *
+   * Selection history can contain overlapping strokes and entries for points
+   * that were later erased or reassigned. Grouping the current assignment map
+   * by label makes the persisted project reflect exactly what is visible now.
+   */
+  getSelectionsSnapshot(): Selection[] {
+    const pointsByLabel = new Map<string, number[]>()
+
+    this.assignedPoints.forEach((labelId, pointIndex) => {
+      // Do not persist assignments whose label has since been deleted.
+      if (!labelManager.getLabel(labelId)) return
+
+      const points = pointsByLabel.get(labelId) || []
+      points.push(pointIndex)
+      pointsByLabel.set(labelId, points)
+    })
+
+    return Array.from(pointsByLabel.entries()).map(([labelId, pointIndices]) => ({
+      id: `saved_${labelId}`,
+      labelId,
+      pointIndices: new Uint32Array(pointIndices),
+      toolUsed: 'brush',
+      createdAt: new Date(),
+      metadata: {
+        toolParameters: { operation: 'saved-assignments' },
+      },
+    }))
+  }
+
+  /** Restore point assignments previously saved for the current dataset. */
+  restoreSelections(savedSelections: readonly Selection[]): void {
+    this.selections.clear()
+    this.assignedPoints.clear()
+    this.clearCurrentSelection()
+    this.state.pendingSelections = []
+    this.history = []
+    this.historyIndex = -1
+    this.updateHistoryState()
+
+    const totalPoints = this.currentPointCloud
+      ? Math.floor(this.currentPointCloud.positions.length / 3)
+      : 0
+
+    for (const savedSelection of savedSelections) {
+      if (!labelManager.getLabel(savedSelection.labelId)) continue
+
+      // IndexedDB preserves typed arrays, while older/imported project data may
+      // contain a plain numeric array.
+      const rawIndices = Array.from(savedSelection.pointIndices as ArrayLike<number>)
+      const validIndices = rawIndices.filter(pointIndex =>
+        Number.isInteger(pointIndex) && pointIndex >= 0 && pointIndex < totalPoints,
+      )
+      if (validIndices.length === 0) continue
+
+      const selection: Selection = {
+        ...savedSelection,
+        pointIndices: new Uint32Array(validIndices),
+        createdAt: new Date(savedSelection.createdAt),
+      }
+
+      this.selections.set(selection.id, selection)
+      validIndices.forEach(pointIndex => {
+        this.assignedPoints.set(pointIndex, selection.labelId)
+      })
+      this.emitter.emit('selection:updated', selection)
+    }
+  }
+
+  /**
    * Clear current selection
    */
   clearCurrentSelection(): void {

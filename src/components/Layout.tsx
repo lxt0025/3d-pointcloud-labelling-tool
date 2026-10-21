@@ -28,6 +28,7 @@ import type {
 } from '../types/index'
 import ToolPanel from './ToolPanel'
 import { selectionManager } from '../utils/selectionManager'
+import { labelManager } from '../utils/labelManager'
 
 /**
  * Main Layout Component for Point Cloud Labelling Tool
@@ -46,12 +47,18 @@ interface LayoutProps {
 }
 
 const Layout: React.FC<LayoutProps> = ({ currentProject }) => {
+  const initialFileIndex = currentProject.activeFileIndex >= 0
+    ? currentProject.activeFileIndex
+    : (currentProject.files.length > 0 ? 0 : -1)
+  const initialFile = initialFileIndex >= 0 ? currentProject.files[initialFileIndex] : undefined
+
   // Application state
-  const [currentPointCloud, setCurrentPointCloud] = useState<PointCloudData | null>(null)
+  const [currentPointCloud, setCurrentPointCloud] = useState<PointCloudData | null>(initialFile?.data || null)
+  const [activeFileId, setActiveFileId] = useState<string | null>(initialFile?.id || null)
   const [pointSize, setPointSize] = useState(0.001)
   
   // Label management state
-  const [labels, setLabels] = useState<Label[]>([])
+  const [labels, setLabels] = useState<Label[]>(() => labelManager.getAllLabels())
   const [activeLabel, setActiveLabel] = useState<Label | null>(null)
 
   // Selection state for integration with tools
@@ -79,8 +86,9 @@ const Layout: React.FC<LayoutProps> = ({ currentProject }) => {
     // ProjectPanel handles the actual file processing
   }, [])
 
-  const handlePointCloudChange = useCallback((pointCloud: PointCloudData | null) => {
+  const handlePointCloudChange = useCallback((pointCloud: PointCloudData | null, fileId: string | null) => {
     setCurrentPointCloud(pointCloud)
+    setActiveFileId(fileId)
   }, [])
 
   // Cube controls handlers
@@ -98,10 +106,12 @@ const Layout: React.FC<LayoutProps> = ({ currentProject }) => {
     window.dispatchEvent(new CustomEvent('axisSnap', { detail: axis }))
   }, [])
 
-  // Initialise empty label list on mount
+  // Restore the saved point assignments after BasicViewport has installed the
+  // new point cloud in selectionManager (which clears the previous dataset).
   useEffect(() => {
-    setLabels([])
-  }, [])
+    if (!currentPointCloud || !activeFileId) return
+    selectionManager.restoreSelections(currentProject.selections[activeFileId] || [])
+  }, [activeFileId, currentPointCloud, currentProject])
 
   // Selection update handler
   useEffect(() => {
